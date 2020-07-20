@@ -1,0 +1,204 @@
+#!/usr/bin/env python
+import sys
+import numpy as np
+
+# Secondary Structure
+COIL = ['S', 'T', ' ', '_']  # ' ' == '_'
+HELIX = ['H', 'G', 'I']
+STRAND = ['E', 'B']
+SS8toSS3 = {'S': 'C', 'T': 'C', ' ': 'C', '_': 'C',
+            'H': 'H', 'G': 'H', 'I': 'H', 'E': 'E', 'B': 'E'}
+
+# SS: C, H, E
+SS3_dict = {'C': 0, 'H': 1, 'E': 2}
+
+SS8_dict = {'S': 0, 'T': 1, ' ': 2, '_': 2,
+            'H': 3, 'G': 4, 'I': 5, 'E': 6, 'B': 7}
+SS8_str = 'ST_HGIEB'
+SS3_str = 'CHE'
+SA3_str = 'BIE'
+# SA: B, I, E
+SA3_dict = {'B': 0, 'I': 1, 'E': 2}
+
+
+def gen_results_ss(target, seq, pred_dir):
+
+    Ypred_ss8_file = pred_dir + '/Ypred_ss8.npy'
+    Ypred_ss8 = np.load(Ypred_ss8_file)
+
+    num_res = Ypred_ss8.shape[0]
+
+    Ypred_ss3 = np.zeros([num_res, 3], dtype=np.float32)
+    Ypred_ss3[:, 0] = Ypred_ss8[:, 0] + Ypred_ss8[:, 1] + Ypred_ss8[:, 2]
+    Ypred_ss3[:, 1] = Ypred_ss8[:, 3] + Ypred_ss8[:, 4] + Ypred_ss8[:, 5]
+    Ypred_ss3[:, 2] = Ypred_ss8[:, 6] + Ypred_ss8[:, 7]
+
+    predfile = pred_dir + '/' + target+'.ss8'
+    fp_ss8 = open(predfile, 'w')
+    line_out = '#resudie_idx AA SS8 S T _ H G I E B \n'
+    fp_ss8.write(line_out)
+
+    for i in range(0, num_res):
+        j = Ypred_ss8[i].argmax()
+        ss8 = SS8_str[j]
+        line_out = '%4d %s %s' % (i+1, seq[i], ss8)
+        for j in range(0, 8):
+            line_out += ' %6.4f' % (Ypred_ss8[i][j])
+        line_out += '\n'
+        fp_ss8.write(line_out)
+    fp_ss8.close()
+
+    predfile = pred_dir + '/' + target+'.ss3'
+    fp_ss3 = open(predfile, 'w')
+    line_out = '#resudie_idx AA SS3 C H E \n'
+    fp_ss3.write(line_out)
+
+    for i in range(0, num_res):
+        j = Ypred_ss3[i].argmax()
+        ss3 = SS3_str[j]
+        line_out = '%4d %s %s' % (i+1, seq[i], ss3)
+        for j in range(0, 3):
+            line_out += ' %6.4f' % (Ypred_ss3[i][j])
+        line_out += '\n'
+        fp_ss3.write(line_out)
+    fp_ss3.close()
+
+
+def gen_results_sa(target, seq, pred_dir):
+
+    Ypred_sa3_file = pred_dir + '/Ypred_sa3.npy'
+    Ypred_rsa_file = pred_dir + '/Ypred_rsa.npy'
+    Ypred_sa3 = np.load(Ypred_sa3_file)
+    Ypred_rsa = np.load(Ypred_rsa_file)
+
+    num_res = Ypred_sa3.shape[0]
+
+    predfile = pred_dir + '/' + target+'.sa'
+    fp_sa = open(predfile, 'w')
+    line_out = '#resudie_idx AA RSA SA3 B I E \n'
+    fp_sa.write(line_out)
+
+    for i in range(0, num_res):
+        j = Ypred_sa3[i].argmax()
+        sa3 = SA3_str[j]
+        line_out = '%4d %s %6.4f %s' % (i+1, seq[i], Ypred_rsa[i][0], sa3)
+        for j in range(0, 3):
+            line_out += ' %6.4f' % (Ypred_sa3[i][j])
+        line_out += '\n'
+        fp_sa.write(line_out)
+    fp_sa.close()
+
+
+def gen_results_dom(target, seq, pred_dir, conf_cut=1.3, NC=40):
+
+    Ypred_dom_file = pred_dir + '/Ypred_dom.npy'
+
+    Ypred_dom = np.load(Ypred_dom_file)
+
+    num_res = Ypred_dom.shape[0]
+    predfile = pred_dir + '/' + target+'.dom'
+
+    fp_dom = open(predfile, 'w')
+    line_out = '#residue_idx amino_acid score_sum score_5 score_10 score_15 score_20\n'
+    fp_dom.write(line_out)
+    scores = []
+    for i in range(0, num_res):
+        score = Ypred_dom[i].sum()
+        line_out = '%4d %s %6.4f' % (i+1, seq[i], score)
+        for j in range(0, 4):
+            line_out += ' %6.4f' % (Ypred_dom[i][j])
+        line_out += '\n'
+        fp_dom.write(line_out)
+        scores += [score]
+    npscores = np.array(scores)
+    arg_scores = np.argsort(-npscores)
+    fp_dom.close()
+
+    boundary = []
+    boundary2 = []
+    bd2 = []
+    for i in range(0, num_res):
+        k = arg_scores[i]
+        score = scores[k]
+        if score < conf_cut:
+            break
+        if (k < 1 or k >= num_res-1):
+            continue
+        check = 0
+        for bb in boundary:
+            if abs(bb-(k+1)) < 40:
+                check += 1
+        if check == 0:
+            boundary += [k+1]
+            if scores[k+1] < scores[k-1]:
+                boundary2 += [[k, k+1]]
+            else:
+                boundary2 += [[k+1, k+2]]
+            bd2 += [[k+1, score]]
+
+    Ncount = 0
+    line_db = ''
+    if len(bd2) == 0:
+        print(target+' is single domain')
+        line_out = 'predicted boundary: None '
+        return
+
+    arg = np.array(bd2)[:, 0].argsort()
+    for j in range(0, len(bd2)):
+        k = arg[j]
+        i = bd2[k][0]
+        score = bd2[k][1]
+        line_db += '%d %6.4f\n' % (i+1, score)
+        if (score >= conf_cut) and (i > NC and i < num_res-NC-1):
+            Ncount += 1
+
+    if Ncount == 0:
+        print(target+' is single domain')
+        line_out = 'predicted boundary: '
+        print(line_out)
+        print(line_db)
+        return
+
+    print('#' + target + ' is multi domain')
+    line_out = '#predicted boundary: residue_index score '
+    print(line_out)
+    print(line_db)
+    return
+
+
+def read_fasta(file_name):
+    fp = open(file_name)
+    lines = fp.readlines()
+    fp.close()
+
+    seq = ""
+    check = 0
+    for line in lines:
+        if line.startswith(">"):
+            if check == 1:
+                break
+            check = 0
+            continue
+        seq += line.strip()
+    return seq
+
+
+def main():
+
+    if len(sys.argv) < 2:
+        print('gen_results.py target')
+        sys.exit()
+
+    target = sys.argv[1]
+    fasta_file = './' + target+'.fasta'
+    seq = read_fasta(fasta_file)
+
+    pred_dir = '.'
+    gen_results_ss(target, seq, pred_dir)
+    gen_results_sa(target, seq, pred_dir)
+    conf_cut = 1.3
+    gen_results_dom(target, seq, pred_dir, conf_cut)
+
+
+if __name__ == '__main__':
+    main()
